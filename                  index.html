@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#1a4373">
+    <link rel="manifest" href="manifest.json">
+    <title>Agro Pro - João Divino</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root { --primary: #1a4373; --bg: #f0f2f5; --warning: #f39c12; --danger: #e74c3c; --success: #25d366; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 10px; margin: 0; -webkit-tap-highlight-color: transparent; }
+        .card { background: white; padding: 18px; border-radius: 12px; box-shadow: 0 3px 6px rgba(0,0,0,0.1); margin-bottom: 12px; border-left: 5px solid var(--primary); }
+        h2 { font-size: 11px; color: #7f8c8d; text-transform: uppercase; margin-bottom: 8px; font-weight: bold; }
+        input, select, textarea { width: 100%; padding: 14px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+        .row { display: flex; gap: 8px; }
+        button { width: 100%; padding: 16px; border: none; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; margin-bottom: 8px; color: white; transition: 0.2s; }
+        button:active { transform: scale(0.98); }
+        .btn-ini { background: var(--primary); }
+        .btn-pausa { background: var(--warning); font-size: 13px; }
+        .cronometro { background: #fff3cd; color: #856404; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 18px; margin: 10px 0; display: none; border: 1px solid #ffeeba; }
+        .resumo { background: #e1f5fe; color: var(--primary); padding: 14px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 16px; }
+        .alerta-erro { background: #fee2e2; color: #b91c1c; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; margin-bottom: 10px; border: 1px solid #f87171; }
+        footer { text-align: center; font-size: 11px; color: #7f8c8d; margin: 20px 0; font-weight: bold; }
+    </style>
+</head>
+<body onload="carregarDados()">
+
+    <div class="card">
+        <h2>Identificação do Campo</h2>
+        <input type="text" id="prop" placeholder="Proprietário" oninput="salvar()">
+        <div class="row">
+            <input type="text" id="faz" placeholder="Fazenda" oninput="salvar()">
+            <input type="text" id="tal" placeholder="Talhão" oninput="salvar()">
+        </div>
+        <input type="text" id="op" placeholder="Operador" oninput="salvar()">
+        <select id="tipo" onchange="salvar()">
+            <option value="hora">🚜 Horímetro</option>
+            <option value="km">🚚 Quilometragem</option>
+        </select>
+    </div>
+
+    <div class="card">
+        <h2>Controle de Horário (Relógio)</h2>
+        <div class="row">
+            <input type="text" id="sIni" placeholder="Início" readonly>
+            <input type="text" id="sFim" placeholder="Fim" readonly>
+        </div>
+        <div class="row">
+            <button class="btn-ini" onclick="marcar('ini')">Iniciar Trabalho</button>
+            <button style="background:#576574" onclick="marcar('fim')">Finalizar Trabalho</button>
+        </div>
+        <div id="displayCronometro" class="cronometro">PAUSA ATIVA...</div>
+        <div class="row">
+            <button class="btn-pausa" onclick="alternarPausa('Almoço')">🍴 Almoço</button>
+            <button class="btn-pausa" onclick="alternarPausa('Manutenção')">🔧 Manutenção</button>
+        </div>
+        <div id="tSist" class="resumo">Tempo Líquido: 00h 00min</div>
+    </div>
+
+    <div class="card">
+        <h2>Medição de Máquina</h2>
+        <div class="row">
+            <input type="number" id="vI" placeholder="Horímetro Inicial" oninput="salvar()">
+            <input type="number" id="vF" placeholder="Horímetro Final" oninput="salvar()">
+        </div>
+        <div id="tMaq" class="resumo">Total trabalhado no dia: 0.00</div>
+    </div>
+
+    <div class="card" id="cardTrava" style="display:none; border-left: 5px solid var(--danger);">
+        <div class="alerta-erro">⚠️ DIVERGÊNCIA DE HORAS!</div>
+        <textarea id="justificativaDivergencia" placeholder="Justifique por que as horas do relógio e da máquina não batem..." oninput="salvar()"></textarea>
+    </div>
+
+    <div id="areaFinal" style="display:none;">
+        <button style="background:var(--success)" onclick="enviarWA()">📲 Enviar WhatsApp</button>
+        <button style="background:#333" onclick="gerarPDF()">📄 Gerar PDF do Dia</button>
+        <button style="background:#ccc; color: #333; font-size: 11px;" onclick="limparTudo()">Reiniciar para Novo Dia</button>
+    </div>
+
+    <footer>Agro na Palma da Mão - Desenvolvido por João Divino Barbosa</footer>
+
+<script>
+    // Registro do Service Worker para funcionar offline
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+    }
+
+    let dados = { ini: null, fim: null, pausas: [], pausaAtiva: null, inicioPausaAtiva: null };
+    let intervalo;
+
+    function salvar() {
+        const estado = {
+            prop: document.getElementById('prop').value,
+            faz: document.getElementById('faz').value,
+            tal: document.getElementById('tal').value,
+            op: document.getElementById('op').value,
+            vI: document.getElementById('vI').value,
+            vF: document.getElementById('vF').value,
+            sIni: document.getElementById('sIni').value,
+            sFim: document.getElementById('sFim').value,
+            tipo: document.getElementById('tipo').value,
+            just: document.getElementById('justificativaDivergencia').value,
+            logica: dados
+        };
+        localStorage.setItem('agro_pwa_v1', JSON.stringify(estado));
+        validarConsistencia();
+    }
+
+    function carregarDados() {
+        const salvo = localStorage.getItem('agro_pwa_v1');
+        if(salvo) {
+            const s = JSON.parse(salvo);
+            document.getElementById('prop').value = s.prop || '';
+            document.getElementById('faz').value = s.faz || '';
+            document.getElementById('tal').value = s.tal || '';
+            document.getElementById('op').value = s.op || '';
+            document.getElementById('vI').value = s.vI || '';
+            document.getElementById('vF').value = s.vF || '';
+            document.getElementById('sIni').value = s.sIni || '';
+            document.getElementById('sFim').value = s.sFim || '';
+            document.getElementById('tipo').value = s.tipo || 'hora';
+            document.getElementById('justificativaDivergencia').value = s.just || '';
+            dados = s.logica;
+            if(dados.pausaAtiva) iniciarCronometro();
+        }
+        validarConsistencia();
+    }
+
+    function marcar(t) {
+        const agora = new Date();
+        const txt = agora.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        if(t === 'ini') { dados.ini = agora.getTime(); document.getElementById('sIni').value = txt; }
+        else { dados.fim = agora.getTime(); document.getElementById('sFim').value = txt; }
+        salvar();
+    }
+
+    function alternarPausa(tipo) {
+        const agora = new Date().getTime();
+        if(!dados.pausaAtiva) {
+            dados.pausaAtiva = tipo;
+            dados.inicioPausaAtiva = agora;
+            iniciarCronometro();
+        } else {
+            dados.pausas.push({ tipo: dados.pausaAtiva, ms: agora - dados.inicioPausaAtiva });
+            dados.pausaAtiva = null;
+            clearInterval(intervalo);
+            document.getElementById('displayCronometro').style.display = 'none';
+        }
+        salvar();
+    }
+
+    function iniciarCronometro() {
+        document.getElementById('displayCronometro').style.display = 'block';
+        intervalo = setInterval(() => {
+            const diff = new Date().getTime() - dados.inicioPausaAtiva;
+            const m = Math.floor(diff / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            document.getElementById('displayCronometro').innerText = `PAUSA ${dados.pausaAtiva.toUpperCase()}: ${m}:${s.toString().padStart(2,'0')}`;
+        }, 1000);
+    }
+
+    function validarConsistencia() {
+        const vI = parseFloat(document.getElementById('vI').value) || 0;
+        const vF = parseFloat(document.getElementById('vF').value) || 0;
+        const hFim = document.getElementById('sFim').value;
+        const totalMaq = vF - vI;
+        const unid = document.getElementById('tipo').value === 'hora' ? "H" : "KM";
+        document.getElementById('tMaq').innerText = `Total trabalhado no dia: ${totalMaq.toFixed(2)} ${unid}`;
+
+        if(!dados.ini || !hFim) return;
+
+        const msTotal = (dados.fim || new Date().getTime()) - dados.ini;
+        const msPausas = dados.pausas.reduce((a, b) => a + b.ms, 0);
+        const liquidoHoras = (msTotal - msPausas) / 3600000;
+        
+        const minTotais = Math.floor(liquidoHoras * 60);
+        document.getElementById('tSist').innerText = `Tempo Líquido: ${Math.floor(minTotais/60)}h ${(minTotais%60).toString().padStart(2,'0')}min`;
+
+        const diferenca = Math.abs(liquidoHoras - totalMaq);
+        const precisaJustificar = diferenca > 0.5; // Mais de 30 min de erro
+        const just = document.getElementById('justificativaDivergencia').value.trim();
+
+        if(precisaJustificar) {
+            document.getElementById('cardTrava').style.display = 'block';
+            document.getElementById('areaFinal').style.display = (just.length > 5) ? 'block' : 'none';
+        } else {
+            document.getElementById('cardTrava').style.display = 'none';
+            document.getElementById('areaFinal').style.display = (vF > 0) ? 'block' : 'none';
+        }
+    }
+
+    function gerarPDF() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const fazenda = document.getElementById('faz').value || "GERAL";
+        
+        doc.setFillColor(26, 67, 115); doc.rect(0, 0, 210, 40, 'F');
+        doc.setTextColor(255, 255, 255); doc.setFontSize(22); doc.text(fazenda.toUpperCase(), 105, 25, {align:'center'});
+        
+        doc.setTextColor(40); doc.setFontSize(12);
+        doc.text(`Proprietário: ${document.getElementById('prop').value}`, 20, 50);
+        doc.text(`Operador: ${document.getElementById('op').value} | Talhão: ${document.getElementById('tal').value}`, 20, 58);
+        
+        doc.setFont("helvetica", "bold"); doc.text("DADOS DA OPERAÇÃO", 20, 75);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Relógio: ${document.getElementById('sIni').value} às ${document.getElementById('sFim').value}`, 20, 83);
+        doc.text(`Medição: ${document.getElementById('vI').value} às ${document.getElementById('vF').value}`, 20, 91);
+        doc.text(`RESULTADO: ${document.getElementById('tMaq').innerText}`, 20, 99);
+        
+        const just = document.getElementById('justificativaDivergencia').value;
+        if(just) {
+            doc.setTextColor(200, 0, 0); doc.text("JUSTIFICATIVA DE DIVERGÊNCIA:", 20, 115);
+            doc.setTextColor(0); doc.setFontSize(10); doc.text(just, 20, 122, {maxWidth: 170});
+        }
+        
+        doc.setFontSize(8); doc.text("Agro na Palma da Mão - João Divino Barbosa", 105, 285, {align:'center'});
+        doc.save(`Relatorio_${fazenda}.pdf`);
+    }
+
+    function enviarWA() {
+        const msg = `*RELATÓRIO AGRO*\n🚜 Fazenda: ${document.getElementById('faz').value}\n⚙️ Máquina: ${document.getElementById('tMaq').innerText}\n🕒 Relógio: ${document.getElementById('tSist').innerText}\n📝 Justificativa: ${document.getElementById('justificativaDivergencia').value || 'N/A'}`;
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`);
+    }
+
+    function limparTudo() {
+        if(confirm("Deseja limpar todos os dados do dia?")) {
+            localStorage.clear();
+            location.reload();
+        }
+    }
+</script>
+</body>
+</html>
