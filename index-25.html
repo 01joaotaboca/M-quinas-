@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#1a4373">
+    <link rel="manifest" href="manifest.json">
+    <title>Agro Pro - João Divino</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root { --primary: #1a4373; --bg: #f0f2f5; --warning: #f39c12; --danger: #e74c3c; --success: #25d366; --gps-ok: #16a34a; --gps-off: #9ca3af; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 10px; margin: 0; -webkit-tap-highlight-color: transparent; }
+        .card { background: white; padding: 18px; border-radius: 12px; box-shadow: 0 3px 6px rgba(0,0,0,0.1); margin-bottom: 12px; border-left: 5px solid var(--primary); }
+        h2 { font-size: 11px; color: #7f8c8d; text-transform: uppercase; margin-bottom: 8px; font-weight: bold; }
+        input, select, textarea { width: 100%; padding: 14px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+        .row { display: flex; gap: 8px; }
+        button { width: 100%; padding: 16px; border: none; border-radius: 10px; font-size: 15px; font-weight: bold; cursor: pointer; margin-bottom: 8px; color: white; transition: 0.2s; }
+        button:active { transform: scale(0.98); }
+        .btn-ini { background: var(--primary); }
+        .btn-pausa { background: var(--warning); font-size: 13px; }
+        .cronometro { background: #fff3cd; color: #856404; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 18px; margin: 10px 0; display: none; border: 1px solid #ffeeba; }
+        .resumo { background: #e1f5fe; color: var(--primary); padding: 14px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 16px; }
+        .alerta-erro { background: #fee2e2; color: #b91c1c; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; margin-bottom: 10px; border: 1px solid #f87171; }
+        footer { text-align: center; font-size: 11px; color: #7f8c8d; margin: 20px 0; font-weight: bold; }
+
+        /* GPS CARD */
+        #cardGPS { border-left: 5px solid var(--gps-off); transition: border-color 0.4s; }
+        #cardGPS.ativo { border-left: 5px solid var(--gps-ok); }
+        .gps-status {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px; border-radius: 8px;
+            background: #f1f5f9; margin-bottom: 10px;
+        }
+        .gps-dot {
+            width: 14px; height: 14px; border-radius: 50%;
+            background: var(--gps-off); flex-shrink: 0;
+            transition: background 0.4s;
+        }
+        .gps-dot.piscando {
+            background: var(--gps-ok);
+            animation: pisca 1.2s infinite;
+        }
+        @keyframes pisca { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .gps-info { font-size: 12px; color: #374151; line-height: 1.5; }
+        .gps-info strong { font-size: 13px; color: var(--primary); }
+        .gps-pontos {
+            display: flex; justify-content: space-between; align-items: center;
+            background: #ecfdf5; border: 1px solid #bbf7d0; border-radius: 8px;
+            padding: 10px 14px; font-size: 13px; color: #166534; font-weight: bold;
+        }
+        .gps-pontos span { font-size: 11px; color: #6b7280; font-weight: normal; }
+        .btn-gps-parar { background: #dc2626; font-size: 13px; margin-top: 6px; padding: 12px; }
+        .gps-erro { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-top: 6px; display:none; }
+        .distancia-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; text-align: center; margin-top: 8px; }
+        .distancia-box .dist-val { font-size: 22px; font-weight: bold; color: var(--primary); }
+        .distancia-box .dist-label { font-size: 11px; color: #6b7280; }
+    </style>
+</head>
+<body onload="carregarDados()">
+
+    <div class="card">
+        <h2>Identificação do Campo</h2>
+        <input type="text" id="prop" placeholder="Proprietário" oninput="salvar()">
+        <div class="row">
+            <input type="text" id="faz" placeholder="Fazenda" oninput="salvar()">
+            <input type="text" id="tal" placeholder="Talhão" oninput="salvar()">
+        </div>
+        <input type="text" id="op" placeholder="Operador" oninput="salvar()">
+        <select id="tipo" onchange="salvar()">
+            <option value="hora">🚜 Horímetro</option>
+            <option value="km">🚚 Quilometragem</option>
+        </select>
+    </div>
+
+    <div class="card">
+        <h2>Controle de Horário (Relógio)</h2>
+        <div class="row">
+            <input type="text" id="sIni" placeholder="Início" readonly>
+            <input type="text" id="sFim" placeholder="Fim" readonly>
+        </div>
+        <div class="row">
+            <button class="btn-ini" onclick="marcar('ini')">Iniciar Trabalho</button>
+            <button style="background:#576574" onclick="marcar('fim')">Finalizar Trabalho</button>
+        </div>
+        <div id="displayCronometro" class="cronometro">PAUSA ATIVA...</div>
+        <div class="row">
+            <button class="btn-pausa" onclick="alternarPausa('Almoço')">🍴 Almoço</button>
+            <button class="btn-pausa" onclick="alternarPausa('Manutenção')">🔧 Manutenção</button>
+        </div>
+        <div id="tSist" class="resumo">Tempo Líquido: 00h 00min</div>
+    </div>
+
+    <div class="card">
+        <h2>Medição de Máquina</h2>
+        <div class="row">
+            <input type="number" id="vI" placeholder="Horímetro Inicial" oninput="onHorimetroInicialChange()">
+            <input type="number" id="vF" placeholder="Horímetro Final" oninput="salvar()">
+        </div>
+        <div id="tMaq" class="resumo">Total trabalhado no dia: 0.00</div>
+    </div>
+
+    <!-- CARD GPS -->
+    <div class="card" id="cardGPS" style="display:none;">
+        <h2>📡 Rastreamento GPS</h2>
+        <div class="gps-status">
+            <div class="gps-dot" id="gpsDot"></div>
+            <div class="gps-info" id="gpsInfo">
+                <strong>Aguardando sinal...</strong><br>
+                Acionado ao preencher horímetro inicial
+            </div>
+        </div>
+        <div class="gps-pontos">
+            <div>
+                <div style="font-size:20px" id="gpsPontosCount">0</div>
+                <span>pontos registrados</span>
+            </div>
+            <div style="text-align:right">
+                <div style="font-size:11px; color:#6b7280">Último registro:</div>
+                <div id="gpsUltimoHorario" style="font-size:12px">—</div>
+            </div>
+        </div>
+        <div class="distancia-box" id="distanciaBox" style="display:none">
+            <div class="dist-val" id="distValor">0,0 km</div>
+            <div class="dist-label">distância percorrida estimada</div>
+        </div>
+        <div class="gps-erro" id="gpsErro"></div>
+        <button class="btn-gps-parar" onclick="pararGPS()" id="btnPararGPS" style="display:none">⛔ Parar Rastreamento</button>
+    </div>
+
+    <div class="card" id="cardTrava" style="display:none; border-left: 5px solid var(--danger);">
+        <div class="alerta-erro">⚠️ DIVERGÊNCIA DE HORAS!</div>
+        <textarea id="justificativaDivergencia" placeholder="Justifique por que as horas do relógio e da máquina não batem..." oninput="salvar()"></textarea>
+    </div>
+
+    <div id="areaFinal" style="display:none;">
+        <button style="background:var(--success)" onclick="enviarWA()">📲 Enviar WhatsApp</button>
+        <button style="background:#333" onclick="gerarPDF()">📄 Gerar PDF do Dia</button>
+        <button style="background:#ccc; color: #333; font-size: 11px;" onclick="limparTudo()">Reiniciar para Novo Dia</button>
+    </div>
+
+    <footer>Agro na Palma da Mão - Desenvolvido por João Divino Barbosa</footer>
+
+<script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+    }
+
+    let dados = { ini: null, fim: null, pausas: [], pausaAtiva: null, inicioPausaAtiva: null };
+    let intervalo;
+
+    // ─── GPS ────────────────────────────────────────────────────────────────────
+    let gpsWatchId = null;
+    let rotaGPS = [];       // [{lat, lng, ts}]
+    let gpsAtivo = false;
+
+    function onHorimetroInicialChange() {
+        salvar();
+        const vI = document.getElementById('vI').value;
+        if (vI && vI > 0 && !gpsAtivo) {
+            iniciarGPS();
+        }
+    }
+
+    function iniciarGPS() {
+        const card = document.getElementById('cardGPS');
+        card.style.display = 'block';
+        card.classList.remove('ativo');
+        document.getElementById('gpsErro').style.display = 'none';
+        document.getElementById('btnPararGPS').style.display = 'block';
+        document.getElementById('gpsInfo').innerHTML = '<strong>Obtendo sinal GPS...</strong><br>Aguarde alguns segundos';
+
+        if (!('geolocation' in navigator)) {
+            mostrarErroGPS('GPS não suportado neste dispositivo.');
+            return;
+        }
+
+        gpsAtivo = true;
+
+        const opcoes = {
+            enableHighAccuracy: true,
+            maximumAge: 15000,
+            timeout: 30000
+        };
+
+        gpsWatchId = navigator.geolocation.watchPosition(
+            onPosicaoGPS,
+            onErroGPS,
+            opcoes
+        );
+    }
+
+    function onPosicaoGPS(pos) {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const agora = new Date();
+        const horario = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        // Registra ponto a cada 30 segundos ou se for o primeiro
+        const ultimo = rotaGPS[rotaGPS.length - 1];
+        const deveSalvar = !ultimo || (agora.getTime() - ultimo.ts) >= 30000;
+
+        if (deveSalvar) {
+            rotaGPS.push({ lat: latitude, lng: longitude, ts: agora.getTime() });
+            salvarRotaLocal();
+        }
+
+        // Atualiza UI
+        const card = document.getElementById('cardGPS');
+        card.classList.add('ativo');
+        document.getElementById('gpsDot').classList.add('piscando');
+        document.getElementById('gpsErro').style.display = 'none';
+
+        document.getElementById('gpsInfo').innerHTML =
+            `<strong>GPS Ativo ✅</strong><br>` +
+            `Lat: ${latitude.toFixed(6)} | Lng: ${longitude.toFixed(6)}<br>` +
+            `Precisão: ±${Math.round(accuracy)}m`;
+
+        document.getElementById('gpsPontosCount').textContent = rotaGPS.length;
+        document.getElementById('gpsUltimoHorario').textContent = horario;
+
+        // Calcula distância
+        const dist = calcularDistanciaTotal();
+        if (dist > 0) {
+            document.getElementById('distanciaBox').style.display = 'block';
+            document.getElementById('distValor').textContent = dist >= 1
+                ? dist.toFixed(2) + ' km'
+                : Math.round(dist * 1000) + ' m';
+        }
+    }
+
+    function onErroGPS(err) {
+        let msg = '';
+        switch(err.code) {
+            case 1: msg = 'Permissão de GPS negada. Ative nas configurações do navegador.'; break;
+            case 2: msg = 'Sinal GPS indisponível. Verifique se está ao ar livre.'; break;
+            case 3: msg = 'Tempo esgotado para obter GPS. Tentando novamente...'; break;
+            default: msg = 'Erro desconhecido no GPS.';
+        }
+        mostrarErroGPS(msg);
+    }
+
+    function mostrarErroGPS(msg) {
+        const el = document.getElementById('gpsErro');
+        el.textContent = '⚠️ ' + msg;
+        el.style.display = 'block';
+        document.getElementById('gpsDot').classList.remove('piscando');
+        document.getElementById('gpsInfo').innerHTML = '<strong style="color:#b91c1c">GPS com problema</strong><br>' + msg;
+    }
+
+    function pararGPS() {
+        if (gpsWatchId !== null) {
+            navigator.geolocation.clearWatch(gpsWatchId);
+            gpsWatchId = null;
+        }
+        gpsAtivo = false;
+        document.getElementById('gpsDot').classList.remove('piscando');
+        document.getElementById('btnPararGPS').style.display = 'none';
+        document.getElementById('gpsInfo').innerHTML =
+            `<strong>Rastreamento encerrado</strong><br>` +
+            `${rotaGPS.length} pontos salvos offline`;
+        document.getElementById('cardGPS').classList.remove('ativo');
+    }
+
+    function salvarRotaLocal() {
+        localStorage.setItem('agro_rota_gps', JSON.stringify(rotaGPS));
+    }
+
+    function carregarRotaLocal() {
+        const s = localStorage.getItem('agro_rota_gps');
+        if (s) {
+            rotaGPS = JSON.parse(s);
+            if (rotaGPS.length > 0) {
+                document.getElementById('cardGPS').style.display = 'block';
+                document.getElementById('gpsPontosCount').textContent = rotaGPS.length;
+                const ultimo = rotaGPS[rotaGPS.length - 1];
+                const h = new Date(ultimo.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                document.getElementById('gpsUltimoHorario').textContent = h;
+                document.getElementById('gpsInfo').innerHTML =
+                    `<strong>Dados GPS carregados</strong><br>` +
+                    `${rotaGPS.length} pontos offline disponíveis`;
+                const dist = calcularDistanciaTotal();
+                if (dist > 0) {
+                    document.getElementById('distanciaBox').style.display = 'block';
+                    document.getElementById('distValor').textContent = dist >= 1
+                        ? dist.toFixed(2) + ' km' : Math.round(dist * 1000) + ' m';
+                }
+            }
+        }
+    }
+
+    function calcularDistanciaTotal() {
+        if (rotaGPS.length < 2) return 0;
+        let total = 0;
+        for (let i = 1; i < rotaGPS.length; i++) {
+            total += haversine(rotaGPS[i-1].lat, rotaGPS[i-1].lng, rotaGPS[i].lat, rotaGPS[i].lng);
+        }
+        return total; // km
+    }
+
+    function haversine(lat1, lon1, lat2, lon2) {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function resumoGPSTexto() {
+        if (rotaGPS.length === 0) return '';
+        const dist = calcularDistanciaTotal();
+        const primeiro = new Date(rotaGPS[0].ts).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
+        const ultimo = new Date(rotaGPS[rotaGPS.length-1].ts).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
+        const distStr = dist >= 1 ? dist.toFixed(2) + ' km' : Math.round(dist * 1000) + ' m';
+        return `📡 GPS: ${rotaGPS.length} pontos | ${distStr} | ${primeiro}→${ultimo}`;
+    }
+
+    // ─── FUNÇÕES ORIGINAIS ───────────────────────────────────────────────────────
+    function salvar() {
+        const estado = {
+            prop: document.getElementById('prop').value,
+            faz: document.getElementById('faz').value,
+            tal: document.getElementById('tal').value,
+            op: document.getElementById('op').value,
+            vI: document.getElementById('vI').value,
+            vF: document.getElementById('vF').value,
+            sIni: document.getElementById('sIni').value,
+            sFim: document.getElementById('sFim').value,
+            tipo: document.getElementById('tipo').value,
+            just: document.getElementById('justificativaDivergencia').value,
+            logica: dados
+        };
+        localStorage.setItem('agro_pwa_v1', JSON.stringify(estado));
+        validarConsistencia();
+    }
+
+    function carregarDados() {
+        const salvo = localStorage.getItem('agro_pwa_v1');
+        if(salvo) {
+            const s = JSON.parse(salvo);
+            document.getElementById('prop').value = s.prop || '';
+            document.getElementById('faz').value = s.faz || '';
+            document.getElementById('tal').value = s.tal || '';
+            document.getElementById('op').value = s.op || '';
+            document.getElementById('vI').value = s.vI || '';
+            document.getElementById('vF').value = s.vF || '';
+            document.getElementById('sIni').value = s.sIni || '';
+            document.getElementById('sFim').value = s.sFim || '';
+            document.getElementById('tipo').value = s.tipo || 'hora';
+            document.getElementById('justificativaDivergencia').value = s.just || '';
+            dados = s.logica;
+            if(dados.pausaAtiva) iniciarCronometro();
+            // Reativa GPS se horímetro inicial já estava preenchido
+            if (s.vI && parseFloat(s.vI) > 0) {
+                carregarRotaLocal();
+            }
+        }
+        validarConsistencia();
+    }
+
+    function marcar(t) {
+        const agora = new Date();
+        const txt = agora.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        if(t === 'ini') { dados.ini = agora.getTime(); document.getElementById('sIni').value = txt; }
+        else { dados.fim = agora.getTime(); document.getElementById('sFim').value = txt; }
+        salvar();
+    }
+
+    function alternarPausa(tipo) {
+        const agora = new Date().getTime();
+        if(!dados.pausaAtiva) {
+            dados.pausaAtiva = tipo;
+            dados.inicioPausaAtiva = agora;
+            iniciarCronometro();
+        } else {
+            dados.pausas.push({ tipo: dados.pausaAtiva, ms: agora - dados.inicioPausaAtiva });
+            dados.pausaAtiva = null;
+            clearInterval(intervalo);
+            document.getElementById('displayCronometro').style.display = 'none';
+        }
+        salvar();
+    }
+
+    function iniciarCronometro() {
+        document.getElementById('displayCronometro').style.display = 'block';
+        intervalo = setInterval(() => {
+            const diff = new Date().getTime() - dados.inicioPausaAtiva;
+            const m = Math.floor(diff / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            document.getElementById('displayCronometro').innerText = `PAUSA ${dados.pausaAtiva.toUpperCase()}: ${m}:${s.toString().padStart(2,'0')}`;
+        }, 1000);
+    }
+
+    function validarConsistencia() {
+        const vI = parseFloat(document.getElementById('vI').value) || 0;
+        const vF = parseFloat(document.getElementById('vF').value) || 0;
+        const hFim = document.getElementById('sFim').value;
+        const totalMaq = vF - vI;
+        const unid = document.getElementById('tipo').value === 'hora' ? "H" : "KM";
+        document.getElementById('tMaq').innerText = `Total trabalhado no dia: ${totalMaq.toFixed(2)} ${unid}`;
+
+        if(!dados.ini || !hFim) return;
+
+        const msTotal = (dados.fim || new Date().getTime()) - dados.ini;
+        const msPausas = dados.pausas.reduce((a, b) => a + b.ms, 0);
+        const liquidoHoras = (msTotal - msPausas) / 3600000;
+        const minTotais = Math.floor(liquidoHoras * 60);
+        document.getElementById('tSist').innerText = `Tempo Líquido: ${Math.floor(minTotais/60)}h ${(minTotais%60).toString().padStart(2,'0')}min`;
+
+        const diferenca = Math.abs(liquidoHoras - totalMaq);
+        const precisaJustificar = diferenca > 0.5;
+        const just = document.getElementById('justificativaDivergencia').value.trim();
+
+        if(precisaJustificar) {
+            document.getElementById('cardTrava').style.display = 'block';
+            document.getElementById('areaFinal').style.display = (just.length > 5) ? 'block' : 'none';
+        } else {
+            document.getElementById('cardTrava').style.display = 'none';
+            document.getElementById('areaFinal').style.display = (vF > 0) ? 'block' : 'none';
+        }
+    }
+
+    function gerarPDF() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const fazenda = document.getElementById('faz').value || "GERAL";
+
+        doc.setFillColor(26, 67, 115); doc.rect(0, 0, 210, 40, 'F');
+        doc.setTextColor(255, 255, 255); doc.setFontSize(22); doc.text(fazenda.toUpperCase(), 105, 25, {align:'center'});
+
+        doc.setTextColor(40); doc.setFontSize(12);
+        doc.text(`Proprietário: ${document.getElementById('prop').value}`, 20, 50);
+        doc.text(`Operador: ${document.getElementById('op').value} | Talhão: ${document.getElementById('tal').value}`, 20, 58);
+
+        doc.setFont("helvetica", "bold"); doc.text("DADOS DA OPERAÇÃO", 20, 75);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Relógio: ${document.getElementById('sIni').value} às ${document.getElementById('sFim').value}`, 20, 83);
+        doc.text(`Medição: ${document.getElementById('vI').value} às ${document.getElementById('vF').value}`, 20, 91);
+        doc.text(`RESULTADO: ${document.getElementById('tMaq').innerText}`, 20, 99);
+
+        // GPS no PDF
+        if (rotaGPS.length > 0) {
+            const dist = calcularDistanciaTotal();
+            const distStr = dist >= 1 ? dist.toFixed(2) + ' km' : Math.round(dist * 1000) + ' m';
+            const hIni = new Date(rotaGPS[0].ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+            const hFim2 = new Date(rotaGPS[rotaGPS.length-1].ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+            doc.setFillColor(22, 163, 74); doc.rect(20, 108, 170, 22, 'F');
+            doc.setTextColor(255,255,255); doc.setFontSize(10);
+            doc.text(`📡 RASTREAMENTO GPS`, 25, 117);
+            doc.text(`${rotaGPS.length} pontos registrados | Distância: ${distStr} | ${hIni} → ${hFim2}`, 25, 125);
+            doc.setTextColor(40);
+        }
+
+        const just = document.getElementById('justificativaDivergencia').value;
+        const yJust = rotaGPS.length > 0 ? 142 : 115;
+        if(just) {
+            doc.setTextColor(200, 0, 0); doc.setFontSize(12); doc.text("JUSTIFICATIVA DE DIVERGÊNCIA:", 20, yJust);
+            doc.setTextColor(0); doc.setFontSize(10); doc.text(just, 20, yJust+7, {maxWidth: 170});
+        }
+
+        doc.setFontSize(8); doc.text("Agro na Palma da Mão - João Divino Barbosa", 105, 285, {align:'center'});
+        doc.save(`Relatorio_${fazenda}.pdf`);
+    }
+
+    function enviarWA() {
+        const gpsTexto = resumoGPSTexto() ? '\n' + resumoGPSTexto() : '';
+        const msg = `*RELATÓRIO AGRO*\n🚜 Fazenda: ${document.getElementById('faz').value}\n⚙️ Máquina: ${document.getElementById('tMaq').innerText}\n🕒 Relógio: ${document.getElementById('tSist').innerText}${gpsTexto}\n📝 Justificativa: ${document.getElementById('justificativaDivergencia').value || 'N/A'}`;
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`);
+    }
+
+    function limparTudo() {
+        if(confirm("Deseja limpar todos os dados do dia?")) {
+            pararGPS();
+            rotaGPS = [];
+            localStorage.clear();
+            location.reload();
+        }
+    }
+</script>
+</body>
+</html>
